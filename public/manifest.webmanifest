@@ -1,0 +1,80 @@
+{
+  "name": "Streamline IPTV",
+  "short_name": "Streamline",
+  "description": "A premium, cinematic IPTV player. Bring your own M3U / Xtream Codes sources and watch on any device.",
+  "categories": ["entertainment", "video"],
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a0c",
+  "theme_color": "#e11d48",
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Live TV",
+      "short_name": "Live",
+      "url": "/?view=live",
+      "description": "Open the live channel grid"
+    },
+    {
+      "name": "Guide",
+      "short_name": "Guide",
+      "url": "/?view=guide",
+      "description": "Open the EPG guide"
+    },
+    {
+      "name": "Favorites",
+      "short_name": "Favorites",
+      "url": "/?view=favorites",
+      "description": "Open your favorite channels"
+    },
+    {
+      "name": "Search",
+      "short_name": "Search",
+      "url": "/?view=search",
+      "description": "Search channels"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
