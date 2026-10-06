@@ -60,18 +60,77 @@ export async function createEngine(opts: EngineCreateOptions): Promise<EngineHan
   if (engine === "hls") {
     const Hls = (await import("hls.js")).default;
     if (Hls.isSupported()) {
+      const bufferSec = Math.max(10, opts.settings.bufferSeconds || 15);
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: opts.settings.bufferSeconds * 2,
-        maxBufferLength: opts.settings.bufferSeconds,
-        maxMaxBufferLength: opts.settings.bufferSeconds * 2.5,
+        lowLatencyMode: false,
+        backBufferLength: bufferSec,
+        maxBufferLength: bufferSec,
+        maxMaxBufferLength: bufferSec * 2,
+        maxBufferSize: 60 * 1000 * 1000,
+        maxBufferHole: 0.5,
+        highBufferWatchdogPeriod: 2,
+        nudgeOffset: 0.1,
+        nudgeMaxRetry: 5,
+        maxFragLookUpTolerance: 0.25,
+        liveSyncDurationCount: 3,
+        autoStartLoad: true,
       });
+
+      let recoveredMediaErrors = 0;
+      let recoveredNetworkErrors = 0;
+
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (!data.fatal) {
+          console.warn("[HLS non-fatal error]", data.type, data.details);
+          return;
+        }
+
+        switch (data.type) {
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            recoveredMediaErrors++;
+            console.warn(`[HLS] Fatal media error (${data.details}), recovery attempt ${recoveredMediaErrors}`);
+            if (recoveredMediaErrors <= 2) {
+              hls.recoverMediaError();
+              return;
+            }
+            if (recoveredMediaErrors === 3) {
+              console.warn(`[HLS] Swapping audio codec and recovering (${data.details})`);
+              try {
+                hls.swapAudioCodec();
+              } catch {}
+              hls.recoverMediaError();
+              return;
+            }
+            opts.onError?.(new Error(`HLS media error: ${data.details}`));
+            break;
+
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            recoveredNetworkErrors++;
+            console.warn(`[HLS] Fatal network error (${data.details}), recovery attempt ${recoveredNetworkErrors}`);
+            if (recoveredNetworkErrors <= 3) {
+              setTimeout(() => {
+                hls.startLoad();
+              }, 1000 * recoveredNetworkErrors);
+              return;
+            }
+            opts.onError?.(new Error(`HLS network error: ${data.details}`));
+            break;
+
+          default:
+            console.error(`[HLS] Unrecoverable fatal error: ${data.type} ${data.details}`);
+            opts.onError?.(new Error(`HLS: ${data.type} ${data.details}`));
+            break;
+        }
+      });
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        recoveredMediaErrors = 0;
+        recoveredNetworkErrors = 0;
+      });
+
       hls.loadSource(opts.url);
       hls.attachMedia(opts.video);
-      hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) opts.onError?.(new Error(`HLS: ${data.type} ${data.details}`));
-      });
       hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
         opts.onManifestParsed?.({
           levels: data.levels.map((l) => ({ height: l.height || 0, bitrate: l.bitrate, label: l.name })),
@@ -96,7 +155,13 @@ export async function createEngine(opts: EngineCreateOptions): Promise<EngineHan
       };
       return {
         engine,
-        destroy: () => hls.destroy(),
+        destroy: () => {
+          try {
+            hls.stopLoad();
+            hls.detachMedia();
+            hls.destroy();
+          } catch {}
+        },
         getStats,
         setLevel: (i) => (hls.currentLevel = i),
         setAudioTrack: (id) => (hls.audioTrack = id),

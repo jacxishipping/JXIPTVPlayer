@@ -60,6 +60,7 @@ export function Player() {
   } = useIptv();
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const activeEngineRef = useRef<EngineHandle | null>(null);
   const [engineHandle, setEngineHandle] = useState<EngineHandle | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCount = useRef(0);
@@ -78,6 +79,29 @@ export function Player() {
   const [duration, setDuration] = useState(0);
   const [showInfo, setShowInfo] = useState(false);
   const [accentGrad, setAccentGrad] = useState<[string, string]>(["oklch(0.65 0.24 18)", "oklch(0.55 0.2 25)"]);
+
+  // Clean up engine completely when player closes
+  useEffect(() => {
+    if (!playerOpen) {
+      if (activeEngineRef.current) {
+        try {
+          activeEngineRef.current.destroy();
+        } catch {}
+        activeEngineRef.current = null;
+      }
+      setEngineHandle(null);
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute("src");
+          videoRef.current.load();
+        } catch {}
+      }
+      setPlaying(false);
+      setLoading(false);
+      setError(null);
+    }
+  }, [playerOpen]);
 
   // Load settings once
   useEffect(() => {
@@ -99,10 +123,23 @@ export function Player() {
       setStats(null);
       setAccentGrad(gradientFromString(channel.name));
 
-      // tear down old engine
-      engineHandle?.destroy();
+      // 1. Tear down old engine cleanly using ref
+      if (activeEngineRef.current) {
+        try {
+          activeEngineRef.current.destroy();
+        } catch (e) {
+          console.warn("Failed to destroy previous engine:", e);
+        }
+        activeEngineRef.current = null;
+      }
       setEngineHandle(null);
-      v.removeAttribute("src");
+
+      // 2. Fully reset video element and MediaSource
+      try {
+        v.pause();
+        v.removeAttribute("src");
+        v.load();
+      } catch {}
 
       const s = settings;
       const url = resolveStreamUrl(channel.url, s);
@@ -118,7 +155,11 @@ export function Player() {
             if (attempt < 3) {
               retryCount.current += 1;
               const delay = Math.pow(2, attempt) * 1000;
-              setTimeout(() => loadStreamRef.current(channel), delay);
+              setTimeout(() => {
+                if (useIptv.getState().playerOpen) {
+                  loadStreamRef.current(channel);
+                }
+              }, delay);
               setError({ message: `Retrying (${attempt + 1}/3)… ${e.message}` });
             } else {
               setError({
@@ -132,9 +173,12 @@ export function Player() {
             setManifest(info);
             setLoading(false);
             retryCount.current = 0;
-            v.play().catch(() => {});
+            v.play().catch((err) => {
+              console.warn("Autoplay was deferred or prevented:", err);
+            });
           },
         });
+        activeEngineRef.current = h;
         setEngineHandle(h);
         // Native <video> fallback may not fire manifest; ensure loading clears
         v.addEventListener(
