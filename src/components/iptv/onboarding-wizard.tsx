@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
 import {
   Link2,
   Upload,
@@ -49,7 +50,14 @@ export function OnboardingWizard() {
   const [includeLive, setIncludeLive] = useState(true);
   const [includeVod, setIncludeVod] = useState(true);
   const [includeSeries, setIncludeSeries] = useState(true);
+  const [useProxy, setUseProxy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void loadSettings().then((settings) => {
+      setUseProxy(Boolean(settings.proxyEnabled));
+    });
+  }, []);
 
   const startDemo = useCallback(async () => {
     setStep("loading");
@@ -168,21 +176,29 @@ export function OnboardingWizard() {
       let sourceText = "";
       if (sourceType === "m3u-url") {
         const targetUrl = url.trim();
-        try {
-          const res = await fetch(targetUrl, { mode: "cors" });
-          if (res.ok) {
-            sourceText = await res.text();
-          } else {
-            throw new Error(`HTTP ${res.status} fetching playlist.`);
+        const fetchPlaylistText = async () => {
+          if (useProxy) {
+            const proxyRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+            if (!proxyRes.ok) {
+              throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+            }
+            return await proxyRes.text();
           }
-        } catch {
-          const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
-          const proxyRes = await fetch(proxyUrl);
-          if (!proxyRes.ok) {
-            throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+
+          try {
+            const res = await fetch(targetUrl, { mode: "cors" });
+            if (!res.ok) throw new Error(`HTTP ${res.status} fetching playlist.`);
+            return await res.text();
+          } catch {
+            const proxyRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+            if (!proxyRes.ok) {
+              throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+            }
+            return await proxyRes.text();
           }
-          sourceText = await proxyRes.text();
-        }
+        };
+
+        sourceText = await fetchPlaylistText();
       } else {
         sourceText = text;
       }
@@ -205,7 +221,7 @@ export function OnboardingWizard() {
       setError(e instanceof Error ? e.message : String(e));
       setStep("configure");
     }
-  }, [sourceType, name, url, text, xtreamServer, xtreamUser, xtreamPass, includeLive, includeVod, includeSeries, setPlaylists, setActivePlaylist]);
+  }, [sourceType, name, url, text, xtreamServer, xtreamUser, xtreamPass, includeLive, includeVod, includeSeries, useProxy, setPlaylists, setActivePlaylist]);
 
   const onFile = useCallback(async (file: File) => {
     setFileName(file.name);
@@ -355,16 +371,25 @@ export function OnboardingWizard() {
                     />
                   </div>
                   {sourceType === "m3u-url" && (
-                    <div>
-                      <Label htmlFor="pl-url">M3U / M3U8 URL</Label>
-                      <Input
-                        id="pl-url"
-                        placeholder="https://example.com/playlist.m3u8"
-                        value={url}
-                        onChange={(e) => setUrl(e.target.value)}
-                      />
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        If the URL is blocked by CORS, enable the proxy in Settings.
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="pl-url">M3U / M3U8 URL</Label>
+                        <Input
+                          id="pl-url"
+                          placeholder="https://example.com/playlist.m3u8"
+                          value={url}
+                          onChange={(e) => setUrl(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                        <div>
+                          <p className="text-sm font-medium">Use proxy</p>
+                          <p className="text-xs text-muted-foreground">Bypass CORS / mixed-content issues for blocked sources.</p>
+                        </div>
+                        <Switch checked={useProxy} onCheckedChange={setUseProxy} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        If the source is blocked, the app will route the request through the proxy.
                       </p>
                     </div>
                   )}

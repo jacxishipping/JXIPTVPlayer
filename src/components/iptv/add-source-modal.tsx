@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Link2, Upload, Code2, Plus, Loader2, CheckCircle2, Play } from "lucide-react";
 import { useIptv } from "@/lib/iptv/store";
-import { getDb, replacePlaylistChannels, savePlaylist } from "@/lib/iptv/db";
+import { getDb, loadSettings, replacePlaylistChannels, savePlaylist } from "@/lib/iptv/db";
 import { parseM3U } from "@/lib/iptv/m3u-parser";
 import { authenticateXtream, importXtreamContent } from "@/lib/iptv/xtream";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -37,7 +38,14 @@ export function AddSourceModal() {
   const [includeLive, setIncludeLive] = useState(true);
   const [includeVod, setIncludeVod] = useState(true);
   const [includeSeries, setIncludeSeries] = useState(true);
+  const [useProxy, setUseProxy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void loadSettings().then((settings) => {
+      setUseProxy(Boolean(settings.proxyEnabled));
+    });
+  }, []);
 
   const close = () => {
     setAddSourceOpen(false);
@@ -146,21 +154,29 @@ export function AddSourceModal() {
       let sourceText = "";
       if (sourceType === "m3u-url") {
         const targetUrl = url.trim();
-        try {
-          const res = await fetch(targetUrl, { mode: "cors" });
-          if (res.ok) {
-            sourceText = await res.text();
-          } else {
-            throw new Error(`HTTP ${res.status} fetching playlist.`);
+        const fetchPlaylistText = async () => {
+          if (useProxy) {
+            const proxyRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+            if (!proxyRes.ok) {
+              throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+            }
+            return await proxyRes.text();
           }
-        } catch {
-          const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
-          const proxyRes = await fetch(proxyUrl);
-          if (!proxyRes.ok) {
-            throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+
+          try {
+            const res = await fetch(targetUrl, { mode: "cors" });
+            if (!res.ok) throw new Error(`HTTP ${res.status} fetching playlist.`);
+            return await res.text();
+          } catch {
+            const proxyRes = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+            if (!proxyRes.ok) {
+              throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+            }
+            return await proxyRes.text();
           }
-          sourceText = await proxyRes.text();
-        }
+        };
+
+        sourceText = await fetchPlaylistText();
       } else {
         sourceText = text;
       }
@@ -190,7 +206,7 @@ export function AddSourceModal() {
       setError(e instanceof Error ? e.message : String(e));
       setLoading(false);
     }
-  }, [sourceType, name, url, text, setPlaylists, setActivePlaylist, setChannels, toast]);
+  }, [sourceType, name, url, text, useProxy, setPlaylists, setActivePlaylist, setChannels, toast]);
 
   return (
     <AnimatePresence>
@@ -265,14 +281,23 @@ export function AddSourceModal() {
               </div>
 
               {sourceType === "m3u-url" && (
-                <div>
-                  <Label htmlFor="asrc-url">M3U / M3U8 URL</Label>
-                  <Input
-                    id="asrc-url"
-                    placeholder="https://example.com/playlist.m3u8"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                  />
+                <div className="space-y-3">
+                  <div>
+                    <Label htmlFor="asrc-url">M3U / M3U8 URL</Label>
+                    <Input
+                      id="asrc-url"
+                      placeholder="https://example.com/playlist.m3u8"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium">Use proxy</p>
+                      <p className="text-xs text-muted-foreground">Bypass CORS / mixed-content issues for blocked sources.</p>
+                    </div>
+                    <Switch checked={useProxy} onCheckedChange={setUseProxy} />
+                  </div>
                 </div>
               )}
 
