@@ -31,9 +31,18 @@ self.onmessage = async (e: MessageEvent<M3UWorkerRequest>) => {
     if (source.kind === "text") {
       text = source.text;
     } else {
-      const res = await fetch(source.url, { mode: "cors" });
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      text = await res.text();
+      try {
+        const res = await fetch(source.url, { mode: "cors" });
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        text = await res.text();
+      } catch {
+        const proxyUrl = `/api/proxy?url=${encodeURIComponent(source.url)}`;
+        const proxyRes = await fetch(proxyUrl);
+        if (!proxyRes.ok) {
+          throw new Error(`HTTP ${proxyRes.status} ${proxyRes.statusText}`);
+        }
+        text = await proxyRes.text();
+      }
     }
     const result = parseM3U(text, playlistId, (processed) => {
       const msg: M3UWorkerProgress = { type: "progress", processed };

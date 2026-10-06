@@ -167,9 +167,22 @@ export function OnboardingWizard() {
 
       let sourceText = "";
       if (sourceType === "m3u-url") {
-        const res = await fetch(url.trim(), { mode: "cors" });
-        if (!res.ok) throw new Error(`HTTP ${res.status} fetching playlist.`);
-        sourceText = await res.text();
+        const targetUrl = url.trim();
+        try {
+          const res = await fetch(targetUrl, { mode: "cors" });
+          if (res.ok) {
+            sourceText = await res.text();
+          } else {
+            throw new Error(`HTTP ${res.status} fetching playlist.`);
+          }
+        } catch {
+          const proxyUrl = `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+          const proxyRes = await fetch(proxyUrl);
+          if (!proxyRes.ok) {
+            throw new Error(`HTTP ${proxyRes.status} fetching playlist via proxy.`);
+          }
+          sourceText = await proxyRes.text();
+        }
       } else {
         sourceText = text;
       }
