@@ -241,7 +241,6 @@ export function Player() {
           onManifestParsed: (info) => {
             if (thisLoadId !== loadIdRef.current) return;
             setManifest(info);
-            setLoading(false);
             retryCount.current = 0;
             void safePlay();
           },
@@ -523,6 +522,20 @@ export function Player() {
             controls={false}
           />
 
+          {loading && !error && (
+            <div
+              role="progressbar"
+              aria-label="Loading stream"
+              className="absolute inset-x-0 top-0 z-30 h-1 overflow-hidden bg-white/15"
+            >
+              <motion.div
+                className="h-full w-1/3 bg-primary"
+                animate={{ x: ["-100%", "300%"] }}
+                transition={{ duration: 1.4, ease: "easeInOut", repeat: Infinity }}
+              />
+            </div>
+          )}
+
           {/* Top bar */}
           <AnimatePresence>
             {controlsVisible && (
@@ -582,7 +595,12 @@ export function Player() {
           {/* Center loading spinner */}
           {loading && !error && (
             <div className="absolute inset-0 z-10 flex items-center justify-center">
-              <div className="h-12 w-12 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+              <div className="flex flex-col items-center gap-3">
+                <div className="h-12 w-12 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                <span className="text-sm text-white/75" role="status">
+                  Loading {playerChannel?.name ?? "stream"}...
+                </span>
+              </div>
             </div>
           )}
 
