@@ -23,9 +23,8 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useIptv } from "@/lib/iptv/store";
-import { getDb, loadSettings } from "@/lib/iptv/db";
+import { getDb, loadSettings, replacePlaylistChannels, savePlaylist } from "@/lib/iptv/db";
 import { parseM3U } from "@/lib/iptv/m3u-parser";
-import { replacePlaylistChannels } from "@/lib/iptv/db";
 import { DEMO_PLAYLIST_M3U, DEMO_PLAYLIST_ID, DEMO_PLAYLIST_NAME } from "@/lib/iptv/demo";
 import { authenticateXtream, importXtreamContent } from "@/lib/iptv/xtream";
 import type { Playlist, SourceType } from "@/lib/iptv/types";
@@ -75,7 +74,7 @@ export function OnboardingWizard() {
       });
       setProgress(70);
       await replacePlaylistChannels(DEMO_PLAYLIST_ID, result.channels);
-      await db.playlists.put({ ...playlist, channelCount: result.count });
+      await savePlaylist({ ...playlist, channelCount: result.count });
       setProgress(100);
       setChannelCount(result.count);
       void seen;
@@ -155,7 +154,7 @@ export function OnboardingWizard() {
         await replacePlaylistChannels(id, result.channels);
         pl.channelCount = result.count;
         pl.credentials = btoa(JSON.stringify(creds));
-        await db.playlists.put(pl);
+        await savePlaylist(pl);
         const all = await db.playlists.toArray();
         all.sort((a, b) => a.addedAt - b.addedAt);
         setPlaylists(all);
@@ -181,7 +180,7 @@ export function OnboardingWizard() {
       });
       setProgress(85);
       await replacePlaylistChannels(id, result.channels);
-      await db.playlists.put({ ...pl, channelCount: result.count });
+      await savePlaylist({ ...pl, channelCount: result.count });
       const all = await db.playlists.toArray();
       all.sort((a, b) => a.addedAt - b.addedAt);
       setPlaylists(all);

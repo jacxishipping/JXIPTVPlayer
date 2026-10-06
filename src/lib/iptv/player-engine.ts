@@ -173,21 +173,6 @@ export async function createEngine(opts: EngineCreateOptions): Promise<EngineHan
     } else if (opts.video.canPlayType("application/vnd.apple.mpegurl")) {
       // Safari native HLS
       opts.video.src = opts.url;
-      const manifestInfo: ManifestInfo = {
-        levels: [],
-        audioTracks: [],
-        subtitleTracks: [],
-        isLive: false,
-        duration: 0,
-      };
-      opts.video.addEventListener(
-        "loadedmetadata",
-        () => {
-          manifestInfo.duration = opts.video.duration;
-          opts.onManifestParsed?.(manifestInfo);
-        },
-        { once: true },
-      );
       return nativeHandle(opts, "native");
     }
     throw new Error("HLS not supported in this browser.");
@@ -228,7 +213,14 @@ export async function createEngine(opts: EngineCreateOptions): Promise<EngineHan
       );
       return {
         engine: "mpegts",
-        destroy: () => player.destroy(),
+        destroy: () => {
+          try {
+            player.pause();
+            player.unload();
+            player.detachMediaElement();
+            player.destroy();
+          } catch {}
+        },
         getStats,
         setLevel: () => {},
         setAudioTrack: () => {},
@@ -248,23 +240,22 @@ export async function createEngine(opts: EngineCreateOptions): Promise<EngineHan
 
 function nativeHandle(opts: EngineCreateOptions, engine: Engine): EngineHandle {
   const v = opts.video;
-  v.addEventListener(
-    "loadedmetadata",
-    () => {
-      opts.onManifestParsed?.({
-        levels: [],
-        audioTracks: [],
-        subtitleTracks: [],
-        isLive: !Number.isFinite(v.duration),
-        duration: v.duration || 0,
-      });
-    },
-    { once: true },
-  );
+  const onLoadedMetadata = () => {
+    opts.onManifestParsed?.({
+      levels: [],
+      audioTracks: [],
+      subtitleTracks: [],
+      isLive: !Number.isFinite(v.duration),
+      duration: v.duration || 0,
+    });
+  };
+  v.addEventListener("loadedmetadata", onLoadedMetadata, { once: true });
   return {
     engine,
     destroy: () => {
       try {
+        v.removeEventListener("loadedmetadata", onLoadedMetadata);
+        v.pause();
         v.removeAttribute("src");
         v.load();
       } catch {}

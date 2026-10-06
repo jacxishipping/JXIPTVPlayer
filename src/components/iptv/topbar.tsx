@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useIptv } from "@/lib/iptv/store";
-import { getDb, loadSettings } from "@/lib/iptv/db";
+import { getDb, loadSettings, loadChannelsFor } from "@/lib/iptv/db";
 import { cn } from "@/lib/utils";
 
 export function TopBar() {
@@ -76,8 +76,7 @@ export function TopBar() {
               key={p.id}
               onClick={async () => {
                 setActivePlaylist(p.id);
-                const db = getDb();
-                const channels = await db.channels.where("playlistId").equals(p.id).toArray();
+                const channels = await loadChannelsFor(p.id);
                 const groups = Array.from(new Set(channels.map((c) => c.group ?? "All"))).sort();
                 useIptv.getState().setChannels(channels, groups);
               }}

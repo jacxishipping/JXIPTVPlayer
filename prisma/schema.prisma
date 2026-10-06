@@ -13,20 +13,78 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Playlist {
+  id              String    @id
+  name            String
+  type            String
+  url             String?
+  credentials     String?
+  channelCount    Int       @default(0)
+  addedAt         Float
+  lastRefreshedAt Float
+  autoRefresh     Int?
+  channels        Channel[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model Channel {
+  id            String    @id
+  playlistId    String
+  playlist      Playlist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  number        String?
+  name          String
+  logo          String?
+  group         String?
+  tvgId         String?
+  tvgName       String?
+  url           String
+  catchup       String?
+  catchupSource String?
+  userAgent     String?
+  referrer      String?
+  hidden        Boolean   @default(false)
+  language      String?
+  quality       String?
+
+  createdAt     DateTime  @default(now())
+
+  @@index([playlistId])
+  @@index([group])
+}
+
+model Favorite {
+  id         String   @id @default("default")
+  channelIds String   @default("[]")
+  updatedAt  DateTime @updatedAt
+}
+
+model HistoryEntry {
+  id          String   @id
+  playlistId  String
+  channelName String
+  channelLogo String?
+  watchedAt   Float
+  position    Float?
+  duration    Float?
+
+  @@index([watchedAt])
+}
+
+model Settings {
+  id               String   @id @default("settings")
+  theme            String   @default("dark")
+  accent           String   @default("oklch(0.65 0.24 18)")
+  language         String   @default("en")
+  defaultEngine    String   @default("auto")
+  bufferSeconds    Int      @default(12)
+  proxyEnabled     Boolean  @default(false)
+  proxyUrl         String?
+  reducedMotion    Boolean  @default(false)
+  autoHideControls Boolean  @default(true)
+  autoplayNext     Boolean  @default(true)
+  parentalPin      String?
+
+  updatedAt        DateTime @updatedAt
 }

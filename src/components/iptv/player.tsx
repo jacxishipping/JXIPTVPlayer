@@ -64,6 +64,7 @@ export function Player() {
   const [engineHandle, setEngineHandle] = useState<EngineHandle | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCount = useRef(0);
+  const loadIdRef = useRef(0);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -80,9 +81,74 @@ export function Player() {
   const [showInfo, setShowInfo] = useState(false);
   const [accentGrad, setAccentGrad] = useState<[string, string]>(["oklch(0.65 0.24 18)", "oklch(0.55 0.2 25)"]);
 
+  // Safe play helper to prevent unhandled AbortError and NotAllowedError exceptions
+  const safePlay = useCallback(async () => {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      const p = v.play();
+      if (p !== undefined) {
+        await p;
+      }
+    } catch (err: unknown) {
+      if (
+        err instanceof Error &&
+        (err.name === "AbortError" ||
+          err.name === "NotAllowedError" ||
+          err.message.includes("interrupted"))
+      ) {
+        // Normal browser interruption when stream reloads or browser autoplay policy applies
+        return;
+      }
+      console.warn("Video playback play error:", err);
+    }
+  }, []);
+
+  // Suppress browser media AbortErrors / autoplay restrictions from triggering Next.js dev overlay
+  useEffect(() => {
+    const handleRejection = (e: PromiseRejectionEvent) => {
+      const reason = e.reason;
+      if (
+        reason &&
+        (reason.name === "AbortError" ||
+          reason.name === "NotAllowedError" ||
+          (typeof reason.message === "string" &&
+            (reason.message.includes("interrupted by a new load request") ||
+              reason.message.includes("interrupted by a call to pause()"))))
+      ) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("unhandledrejection", handleRejection);
+    return () => {
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
+  }, []);
+
+  // Clean up engine completely when player unmounts
+  useEffect(() => {
+    return () => {
+      loadIdRef.current += 1;
+      if (activeEngineRef.current) {
+        try {
+          activeEngineRef.current.destroy();
+        } catch {}
+        activeEngineRef.current = null;
+      }
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute("src");
+          videoRef.current.load();
+        } catch {}
+      }
+    };
+  }, []);
+
   // Clean up engine completely when player closes
   useEffect(() => {
     if (!playerOpen) {
+      loadIdRef.current += 1;
       if (activeEngineRef.current) {
         try {
           activeEngineRef.current.destroy();
@@ -117,6 +183,8 @@ export function Player() {
     async (channel: Channel) => {
       if (!videoRef.current) return;
       const v = videoRef.current;
+      const thisLoadId = ++loadIdRef.current;
+
       setError(null);
       setLoading(true);
       setManifest(null);
@@ -150,13 +218,14 @@ export function Player() {
           url,
           settings: s,
           onError: (e) => {
+            if (thisLoadId !== loadIdRef.current) return;
             // exponential backoff retry (max 3)
             const attempt = retryCount.current;
             if (attempt < 3) {
               retryCount.current += 1;
               const delay = Math.pow(2, attempt) * 1000;
               setTimeout(() => {
-                if (useIptv.getState().playerOpen) {
+                if (useIptv.getState().playerOpen && thisLoadId === loadIdRef.current) {
                   loadStreamRef.current(channel);
                 }
               }, delay);
@@ -170,23 +239,36 @@ export function Player() {
             }
           },
           onManifestParsed: (info) => {
+            if (thisLoadId !== loadIdRef.current) return;
             setManifest(info);
             setLoading(false);
             retryCount.current = 0;
-            v.play().catch((err) => {
-              console.warn("Autoplay was deferred or prevented:", err);
-            });
+            void safePlay();
           },
         });
+
+        // Guard against race condition: if another stream started loading while awaiting createEngine, discard this engine immediately
+        if (thisLoadId !== loadIdRef.current) {
+          try {
+            h.destroy();
+          } catch {}
+          return;
+        }
+
         activeEngineRef.current = h;
         setEngineHandle(h);
-        // Native <video> fallback may not fire manifest; ensure loading clears
-        v.addEventListener(
-          "canplay",
-          () => setLoading(false),
-          { once: true },
-        );
+
+        // Native <video> fallback may not fire manifest; ensure loading clears & starts play
+        const onCanPlay = () => {
+          if (thisLoadId !== loadIdRef.current) return;
+          setLoading(false);
+          if (v.paused) {
+            void safePlay();
+          }
+        };
+        v.addEventListener("canplay", onCanPlay, { once: true });
       } catch (e) {
+        if (thisLoadId !== loadIdRef.current) return;
         setError({
           message:
             e instanceof Error
@@ -197,7 +279,7 @@ export function Player() {
         setLoading(false);
       }
     },
-    [settings],
+    [settings, safePlay],
   );
 
   // Keep the ref in sync so the retry callback always calls the latest loadStream.
@@ -212,13 +294,21 @@ export function Player() {
       (async () => {
         try {
           const db = getDb();
-          await db.history.put({
+          const entry = {
             id: playerChannel.id,
             playlistId: playerChannel.playlistId,
             channelName: playerChannel.name,
             channelLogo: playerChannel.logo,
             watchedAt: Date.now(),
-          });
+          };
+          await db.history.put(entry);
+          try {
+            await fetch("/api/history", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(entry),
+            });
+          } catch {}
           // update recent list (dedupe, newest first)
           const next = [playerChannel, ...recent.filter((c) => c.id !== playerChannel.id)].slice(0, 24);
           setRecent(next);
@@ -317,7 +407,7 @@ export function Player() {
         case " ":
         case "k":
           e.preventDefault();
-          if (v.paused) v.play(); else v.pause();
+          if (v.paused) void safePlay(); else v.pause();
           break;
         case "arrowright":
           v.currentTime += 10;
@@ -356,7 +446,7 @@ export function Player() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [playerOpen, zap, closePlayer, bumpControls]);
+  }, [playerOpen, zap, closePlayer, bumpControls, safePlay]);
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -366,8 +456,8 @@ export function Player() {
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) v.play(); else v.pause();
-  }, []);
+    if (v.paused) void safePlay(); else v.pause();
+  }, [safePlay]);
 
   const toggleMute = useCallback(() => {
     const v = videoRef.current;
@@ -430,7 +520,6 @@ export function Player() {
             ref={videoRef}
             className="relative h-full w-full bg-black object-contain"
             playsInline
-            autoPlay
             controls={false}
           />
 

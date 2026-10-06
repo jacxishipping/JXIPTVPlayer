@@ -4,7 +4,7 @@ import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Link2, Upload, Code2, Plus, Loader2, CheckCircle2, Play } from "lucide-react";
 import { useIptv } from "@/lib/iptv/store";
-import { getDb, replacePlaylistChannels } from "@/lib/iptv/db";
+import { getDb, replacePlaylistChannels, savePlaylist } from "@/lib/iptv/db";
 import { parseM3U } from "@/lib/iptv/m3u-parser";
 import { authenticateXtream, importXtreamContent } from "@/lib/iptv/xtream";
 import { Button } from "@/components/ui/button";
@@ -126,7 +126,7 @@ export function AddSourceModal() {
         await replacePlaylistChannels(id, result.channels);
         pl.channelCount = result.count;
         pl.credentials = btoa(JSON.stringify(creds));
-        await db.playlists.put(pl);
+        await savePlaylist(pl);
         const all = await db.playlists.toArray();
         all.sort((a, b) => a.addedAt - b.addedAt);
         setPlaylists(all);
@@ -159,7 +159,7 @@ export function AddSourceModal() {
       await replacePlaylistChannels(id, result.channels);
       pl.channelCount = result.count;
       pl.lastRefreshedAt = Date.now();
-      await db.playlists.put(pl);
+      await savePlaylist(pl);
       const all = await db.playlists.toArray();
       all.sort((a, b) => a.addedAt - b.addedAt);
       setPlaylists(all);

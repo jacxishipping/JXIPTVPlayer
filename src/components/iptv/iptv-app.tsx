@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useIptv } from "@/lib/iptv/store";
-import { getDb, loadSettings, saveSettings } from "@/lib/iptv/db";
+import { getDb, loadSettings, saveSettings, syncPlaylistsWithServer, loadChannelsFor } from "@/lib/iptv/db";
 import { Sidebar, MobileTabBar, MobileTopBar } from "./sidebar";
 import { TopBar } from "./topbar";
 import { HomeScreen } from "./home-screen";
@@ -54,9 +54,8 @@ export function IptvApp() {
           document.documentElement.style.setProperty("--ring", s.accent);
           document.documentElement.style.setProperty("--sidebar-primary", s.accent);
         }
-        const db = getDb();
-        const all = await db.playlists.toArray();
-        all.sort((a, b) => a.addedAt - b.addedAt);
+        // Sync and load playlists from server SQLite + local cache
+        const all = await syncPlaylistsWithServer();
         setPlaylists(all);
         if (all.length === 0) {
           setOnboardingOpen(true);
@@ -64,12 +63,25 @@ export function IptvApp() {
           // load channels for the first playlist (or active)
           const activeId = all[0].id;
           setActivePlaylist(activeId);
-          const channels = await db.channels.where("playlistId").equals(activeId).toArray();
+          const channels = await loadChannelsFor(activeId);
           const groups = Array.from(new Set(channels.map((c) => c.group ?? "All Channels"))).sort();
           setChannels(channels, groups);
         }
         // Load favorites
+        const db = getDb();
         let fav = await db.favorites.get("default");
+        if (!fav) {
+          try {
+            const res = await fetch("/api/favorites");
+            if (res.ok) {
+              const data = await res.json();
+              if (Array.isArray(data.channelIds) && data.channelIds.length > 0) {
+                fav = { id: "default", name: "Favorites", createdAt: Date.now(), channelIds: data.channelIds };
+                await db.favorites.put(fav);
+              }
+            }
+          } catch {}
+        }
         if (!fav) {
           fav = { id: "default", name: "Favorites", createdAt: Date.now(), channelIds: [] };
           await db.favorites.put(fav);
@@ -77,23 +89,32 @@ export function IptvApp() {
         useIptv.getState().setFavorites(new Set(fav.channelIds));
       } catch (e) {
         console.error("Bootstrap failed:", e);
+        setOnboardingOpen(true);
       } finally {
         setBooted(true);
       }
     })();
   }, []);
 
-  // Persist favorites to Dexie whenever the set changes
+  // Persist favorites to Dexie and server SQLite database whenever the set changes
   useEffect(() => {
     if (!booted) return;
     (async () => {
       const db = getDb();
+      const channelIds = Array.from(favorites);
       await db.favorites.put({
         id: "default",
         name: "Favorites",
         createdAt: Date.now(),
-        channelIds: Array.from(favorites),
+        channelIds,
       });
+      try {
+        await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ channelIds }),
+        });
+      } catch {}
     })();
   }, [favorites, booted]);
 
@@ -125,8 +146,7 @@ export function IptvApp() {
   useEffect(() => {
     if (!booted || !activePlaylistId) return;
     (async () => {
-      const db = getDb();
-      const channels = await db.channels.where("playlistId").equals(activePlaylistId).toArray();
+      const channels = await loadChannelsFor(activePlaylistId);
       const groups = Array.from(new Set(channels.map((c) => c.group ?? "All Channels"))).sort();
       setChannels(channels, groups);
     })();
