@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
-import { Heart, History as HistoryIcon, Film, Clapperboard, Tv, Clock } from "lucide-react";
+import { Heart, History as HistoryIcon, Film, Clapperboard, Tv, Clock, Search, X } from "lucide-react";
 import { useIptv } from "@/lib/iptv/store";
 import { ChannelLogo } from "./channel-logo";
 import { ContentRail } from "./content-rail";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import type { Channel } from "@/lib/iptv/types";
 
 export function FavoritesView() {
@@ -87,41 +89,115 @@ export function HistoryView() {
 
 export function MediaPlaceholderView({ kind }: { kind: "movies" | "series" }) {
   const { channels, openPlayer } = useIptv();
+  const [search, setSearch] = useState("");
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const isMovies = kind === "movies";
   const Icon = isMovies ? Film : Clapperboard;
-  // Group by name keyword (Movies/Series/VOD)
-  const filtered = useMemo(() => {
-    const re = isMovies ? /\b(movie|vod|film)\b/i : /\b(series|tv show|serien)\b/i;
+
+  // Filter channels matching movies or series
+  const baseItems = useMemo(() => {
+    const re = isMovies ? /\b(movie|vod|film|cinema)\b/i : /\b(series|tv show|serien|season|episode)\b/i;
     const matches = channels.filter((c) => re.test(c.group ?? "") || re.test(c.name));
-    // If no matches, just show all with logos
     return matches.length > 0 ? matches : channels.filter((c) => c.logo).slice(0, 40);
   }, [channels, isMovies]);
 
+  // Extract unique groups
+  const groups = useMemo(() => {
+    const s = new Set<string>();
+    baseItems.forEach((c) => {
+      if (c.group) s.add(c.group);
+    });
+    return Array.from(s).sort();
+  }, [baseItems]);
+
+  const filtered = useMemo(() => {
+    let list = baseItems;
+    if (selectedGroup) {
+      list = list.filter((c) => c.group === selectedGroup);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((c) => c.name.toLowerCase().includes(q) || (c.group && c.group.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [baseItems, selectedGroup, search]);
+
   return (
-    <div className="px-4 lg:px-6 py-6">
-      <header className="mb-6 flex items-center gap-2">
-        <Icon className="h-6 w-6 text-primary" />
-        <h1 className="font-[var(--font-display)] text-3xl font-bold tracking-tight">
-          {isMovies ? "Movies" : "Series"}
-        </h1>
+    <div className="px-4 lg:px-6 py-6 space-y-5">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="h-6 w-6 text-primary" />
+          <h1 className="font-[var(--font-display)] text-3xl font-bold tracking-tight">
+            {isMovies ? "Movies" : "Series"}
+          </h1>
+          <Badge variant="secondary" className="ml-2 font-mono">
+            {filtered.length}
+          </Badge>
+        </div>
+
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder={`Search ${isMovies ? "movies" : "series"}…`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 pr-8 h-9"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </header>
-      <div className="mb-4 rounded-xl border border-dashed border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
-        {isMovies ? (
-          <>
-            <Tv className="inline mr-1 h-4 w-4" /> VOD content from your M3U / Xtream source appears here.
-            Series with seasons &amp; episodes require an Xtream Codes source (coming soon).
-          </>
-        ) : (
-          <>
-            <Tv className="inline mr-1 h-4 w-4" /> Series episodes appear here when you add an Xtream Codes source.
-          </>
-        )}
+
+      {groups.length > 1 && (
+        <div className="flex flex-wrap gap-1.5 pb-1">
+          <Button
+            size="sm"
+            variant={selectedGroup === null ? "default" : "outline"}
+            onClick={() => setSelectedGroup(null)}
+            className="h-7 text-xs rounded-lg"
+          >
+            All Categories
+          </Button>
+          {groups.slice(0, 12).map((g) => (
+            <Button
+              key={g}
+              size="sm"
+              variant={selectedGroup === g ? "default" : "outline"}
+              onClick={() => setSelectedGroup(g)}
+              className="h-7 text-xs rounded-lg"
+            >
+              {g.replace(/^(Movies:\s*|Series:\s*)/i, "")}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground flex items-center gap-2">
+        <Tv className="h-4 w-4 shrink-0 text-primary" />
+        <span>
+          {isMovies
+            ? "VOD films and on-demand titles from your M3U or Xtream source appear here. Click any poster to watch instantly."
+            : "TV Series and episodic content from your playlist appear here. Click any poster to start streaming."}
+        </span>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-        {filtered.map((ch, i) => (
-          <PosterTile key={ch.id} channel={ch} index={i} onPlay={() => openPlayer(ch, filtered)} />
-        ))}
-      </div>
+
+      {filtered.length === 0 ? (
+        <div className="py-16 text-center text-sm text-muted-foreground">
+          No {isMovies ? "movies" : "series"} matched your query.
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {filtered.map((ch, i) => (
+            <PosterTile key={ch.id} channel={ch} index={i} onPlay={() => openPlayer(ch, filtered)} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

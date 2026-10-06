@@ -27,6 +27,7 @@ import { getDb, loadSettings } from "@/lib/iptv/db";
 import { parseM3U } from "@/lib/iptv/m3u-parser";
 import { replacePlaylistChannels } from "@/lib/iptv/db";
 import { DEMO_PLAYLIST_M3U, DEMO_PLAYLIST_ID, DEMO_PLAYLIST_NAME } from "@/lib/iptv/demo";
+import { authenticateXtream, importXtreamContent } from "@/lib/iptv/xtream";
 import type { Playlist, SourceType } from "@/lib/iptv/types";
 
 type Step = "welcome" | "source" | "configure" | "loading" | "done";
@@ -43,6 +44,12 @@ export function OnboardingWizard() {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [channelCount, setChannelCount] = useState(0);
+  const [xtreamServer, setXtreamServer] = useState("");
+  const [xtreamUser, setXtreamUser] = useState("");
+  const [xtreamPass, setXtreamPass] = useState("");
+  const [includeLive, setIncludeLive] = useState(true);
+  const [includeVod, setIncludeVod] = useState(true);
+  const [includeSeries, setIncludeSeries] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const startDemo = useCallback(async () => {
@@ -99,22 +106,65 @@ export function OnboardingWizard() {
     if (sourceType === "m3u-file" && !text.trim()) {
       return setError("Choose a file to upload first.");
     }
+    if (sourceType === "xtream") {
+      if (!xtreamServer.trim() || !xtreamUser.trim() || !xtreamPass.trim()) {
+        return setError("Please provide Server URL, Username, and Password.");
+      }
+    }
     setStep("loading");
     setProgress(5);
     try {
       const db = getDb();
       const id = `pl_${Date.now().toString(36)}`;
+      const defaultName =
+        sourceType === "m3u-url"
+          ? new URL(url).hostname
+          : sourceType === "xtream"
+          ? "Xtream (" + xtreamUser.trim() + ")"
+          : "My Playlist";
       const pl: Playlist = {
         id,
-        name: name.trim() || (sourceType === "m3u-url" ? new URL(url).hostname : "My Playlist"),
+        name: name.trim() || defaultName,
         type: sourceType,
-        url: sourceType === "m3u-url" ? url.trim() : undefined,
+        url: sourceType === "m3u-url" ? url.trim() : sourceType === "xtream" ? xtreamServer.trim() : undefined,
         channelCount: 0,
         addedAt: Date.now(),
         lastRefreshedAt: Date.now(),
       };
       await db.playlists.put(pl);
-      setProgress(20);
+      setProgress(15);
+
+      if (sourceType === "xtream") {
+        const creds = {
+          server: xtreamServer.trim(),
+          username: xtreamUser.trim(),
+          password: xtreamPass.trim(),
+        };
+        setProgress(25);
+        await authenticateXtream(creds);
+        setProgress(45);
+        const result = await importXtreamContent(creds, id, {
+          includeLive,
+          includeVod,
+          includeSeries,
+          onProgress: (_msg, count) => {
+            setProgress((prev) => Math.min(85, prev + 3));
+          },
+        });
+        setProgress(90);
+        await replacePlaylistChannels(id, result.channels);
+        pl.channelCount = result.count;
+        pl.credentials = btoa(JSON.stringify(creds));
+        await db.playlists.put(pl);
+        const all = await db.playlists.toArray();
+        all.sort((a, b) => a.addedAt - b.addedAt);
+        setPlaylists(all);
+        setActivePlaylist(id);
+        setChannelCount(result.count);
+        setProgress(100);
+        setStep("done");
+        return;
+      }
 
       let sourceText = "";
       if (sourceType === "m3u-url") {
@@ -143,7 +193,7 @@ export function OnboardingWizard() {
       setError(e instanceof Error ? e.message : String(e));
       setStep("configure");
     }
-  }, [sourceType, name, url, text, setPlaylists, setActivePlaylist]);
+  }, [sourceType, name, url, text, xtreamServer, xtreamUser, xtreamPass, includeLive, includeVod, includeSeries, setPlaylists, setActivePlaylist]);
 
   const onFile = useCallback(async (file: File) => {
     setFileName(file.name);
@@ -256,11 +306,10 @@ export function OnboardingWizard() {
                     title="Xtream Codes"
                     desc="Server URL + username + password"
                     selected={sourceType === "xtream"}
-                    badge="soon"
                   />
                 </RadioGroup>
                 <div className="mt-8 flex justify-end">
-                  <Button onClick={() => setStep("configure")} disabled={sourceType === "xtream"}>
+                  <Button onClick={() => setStep("configure")}>
                     Continue
                     <ChevronRight className="ml-2 h-4 w-4" />
                   </Button>
@@ -345,6 +394,72 @@ export function OnboardingWizard() {
                       />
                     </div>
                   )}
+                  {sourceType === "xtream" && (
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="xt-server">Server URL</Label>
+                        <Input
+                          id="xt-server"
+                          placeholder="http://iptv-server.com:8080"
+                          value={xtreamServer}
+                          onChange={(e) => setXtreamServer(e.target.value)}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <Label htmlFor="xt-user">Username</Label>
+                          <Input
+                            id="xt-user"
+                            placeholder="username"
+                            value={xtreamUser}
+                            onChange={(e) => setXtreamUser(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="xt-pass">Password</Label>
+                          <Input
+                            id="xt-pass"
+                            type="password"
+                            placeholder="password"
+                            value={xtreamPass}
+                            onChange={(e) => setXtreamPass(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="pt-1">
+                        <Label className="text-xs text-muted-foreground mb-2 block">Content to import</Label>
+                        <div className="flex flex-wrap gap-4 text-sm">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={includeLive}
+                              onChange={(e) => setIncludeLive(e.target.checked)}
+                              className="accent-primary rounded"
+                            />
+                            <span>Live TV</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={includeVod}
+                              onChange={(e) => setIncludeVod(e.target.checked)}
+                              className="accent-primary rounded"
+                            />
+                            <span>Movies (VOD)</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={includeSeries}
+                              onChange={(e) => setIncludeSeries(e.target.checked)}
+                              className="accent-primary rounded"
+                            />
+                            <span>TV Series</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {error && (
                   <Alert variant="destructive">
@@ -355,7 +470,7 @@ export function OnboardingWizard() {
                   <Button variant="ghost" onClick={startDemo}>
                     Try demo instead
                   </Button>
-                  <Button onClick={addSource} disabled={sourceType === "xtream"}>
+                  <Button onClick={addSource}>
                     Test & add
                     <ChevronRight className="ml-2 h-4 w-4" />
                   </Button>

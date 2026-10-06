@@ -103,3 +103,32 @@ Stage Summary:
   * Mobile (390px): bottom tab bar fixed to viewport bottom (sticky footer verified, tabBarBottom=viewportH), mobile top brand bar.
 - Dev server: 0 runtime errors, all routes 200.
 - Lint: 0 errors.
+
+---
+Task ID: 7
+Agent: lead
+Task: Xtream Codes API integration, EPG URL fetcher, and VOD Movies/Series enhancements
+
+Work Log:
+- Created src/lib/iptv/xtream.ts:
+  * Full player_api.php authentication & connection testing (user_info, server_info).
+  * Ingestion of Live streams, VOD movies, and TV series with category mapping.
+  * Automatic stream URL resolution with m3u8/ts and container extensions.
+  * Transparent proxy fallback via /api/proxy for providers without CORS headers.
+  * XMLTV URL generation helper (getXtreamXmltvUrl).
+- Updated src/components/iptv/onboarding-wizard.tsx:
+  * Enabled Xtream Codes option (removed disabled/soon lock).
+  * Added Server URL, Username, Password, and import selector (Live TV, VOD, Series).
+  * Integrated Xtream credentials storage and channel persistence in Dexie.
+- Updated src/components/iptv/add-source-modal.tsx:
+  * Added 4-column source selector including Xtream Codes.
+  * Added Xtream configuration fields, authentication, and progress reporting.
+- Updated src/components/iptv/epg-grid.tsx:
+  * Added "Fetch from URL" option in toolbar and empty state.
+  * Integrated XMLTV URL fetch dialog with automatic proxy fallback and live refresh.
+- Updated src/components/iptv/library-views.tsx:
+  * Added live search bar and category pill filter to MediaPlaceholderView (Movies & Series).
+  * Added item count badges and updated informational guide notices.
+- Fixed typo in player-engine.ts, generated missing PWA PNG icons, and adapted npm scripts for cross-platform execution.
+- Lint check: 0 errors, 0 warnings.
+- Dev server verified: HTTP 200, clean Turbopack compile.

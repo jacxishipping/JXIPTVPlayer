@@ -14,10 +14,22 @@ import {
   Tv2,
   Upload,
   Video,
+  Globe,
+  Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChannelLogo } from "./channel-logo";
 import { useIptv } from "@/lib/iptv/store";
 import { getDb } from "@/lib/iptv/db";
@@ -80,6 +92,9 @@ export default function EpgGrid() {
   const [programmesByTvgId, setProgrammesByTvgId] = useState<Map<string, EpgProgramme[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [urlDialogOpen, setUrlDialogOpen] = useState(false);
+  const [epgUrlInput, setEpgUrlInput] = useState("");
+  const [importingUrl, setImportingUrl] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -248,6 +263,51 @@ export default function EpgGrid() {
     [toast],
   );
 
+  // ---- XMLTV URL fetch handler ----
+  const handleUrlImport = useCallback(async () => {
+    if (!epgUrlInput.trim()) return;
+    setImportingUrl(true);
+    try {
+      const target = epgUrlInput.trim();
+      let text = "";
+      try {
+        const res = await fetch(target);
+        if (res.ok) text = await res.text();
+      } catch {}
+      if (!text) {
+        const res = await fetch(`/api/proxy?url=${encodeURIComponent(target)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        text = await res.text();
+      }
+      const { programmes } = parseXmltv(text);
+      if (programmes.length === 0) {
+        toast({
+          title: "No programmes found",
+          description: "The XMLTV document contained no programmes.",
+          variant: "destructive",
+        });
+        return;
+      }
+      const db = getDb();
+      await db.epg.bulkPut(programmes);
+      toast({
+        title: "EPG imported",
+        description: `${programmes.length.toLocaleString()} programmes added to the guide.`,
+      });
+      setRefreshKey((k) => k + 1);
+      setUrlDialogOpen(false);
+      setEpgUrlInput("");
+    } catch (err) {
+      toast({
+        title: "Failed to fetch EPG",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setImportingUrl(false);
+    }
+  }, [epgUrlInput, toast]);
+
   if (!mounted) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -276,18 +336,28 @@ export default function EpgGrid() {
           </p>
         </div>
         {!noChannels && (
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={importing}
-            className="gap-2"
-          >
-            {importing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="h-4 w-4" />
-            )}
-            Import XMLTV
-          </Button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importing}
+              className="gap-2"
+            >
+              {importing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4" />
+              )}
+              Import XMLTV File
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setUrlDialogOpen(true)}
+              className="gap-2"
+            >
+              <Globe className="h-4 w-4" />
+              Fetch from URL
+            </Button>
+          </div>
         )}
         <input
           ref={fileInputRef}
@@ -365,7 +435,18 @@ export default function EpgGrid() {
           ) : (
             <Upload className="h-4 w-4" />
           )}
-          <span className="hidden sm:inline">Import</span>
+          <span className="hidden sm:inline">Import File</span>
+        </Button>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => setUrlDialogOpen(true)}
+          aria-label="Fetch EPG from URL"
+        >
+          <Globe className="h-4 w-4" />
+          <span className="hidden sm:inline">From URL</span>
         </Button>
 
         <div className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
@@ -464,6 +545,38 @@ export default function EpgGrid() {
         className="hidden"
         onChange={handleXmltvImport}
       />
+
+      {/* ---- EPG URL Dialog ---- */}
+      <Dialog open={urlDialogOpen} onOpenChange={setUrlDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Fetch EPG from URL</DialogTitle>
+            <DialogDescription>
+              Enter a public XMLTV URL. Cross-origin requests will be proxied automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="epg-url-input">XMLTV / EPG URL</Label>
+              <Input
+                id="epg-url-input"
+                placeholder="https://example.com/epg.xml"
+                value={epgUrlInput}
+                onChange={(e) => setEpgUrlInput(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setUrlDialogOpen(false)} disabled={importingUrl}>
+              Cancel
+            </Button>
+            <Button onClick={handleUrlImport} disabled={importingUrl || !epgUrlInput.trim()}>
+              {importingUrl ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Globe className="mr-2 h-4 w-4" />}
+              Fetch & Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
