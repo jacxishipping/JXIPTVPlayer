@@ -72,7 +72,6 @@ export async function createEngine(opts: EngineCreateOptions): Promise<EngineHan
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) opts.onError?.(new Error(`HLS: ${data.type} ${data.details}`));
       });
-      hls.on(Hls.Events.MANIFEST_PARESTED, () => {});
       hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
         opts.onManifestParsed?.({
           levels: data.levels.map((l) => ({ height: l.height || 0, bitrate: l.bitrate, label: l.name })),
